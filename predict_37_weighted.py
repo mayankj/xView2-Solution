@@ -18,18 +18,19 @@ from xview.inference import (
 
 
 def weighted_model(checkpoint_fname: str, weights, activation: str):
-    model, info = model_from_checkpoint(fs.auto_file(checkpoint_fname, where="models"), activation_after=activation, report=False)
+    model, info = model_from_checkpoint(fs.auto_file(checkpoint_fname, where="ensemble"), activation_after=activation, report=False)
     model = ApplyWeights(model, weights)
     return model, info
 
 
 def main():
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("-o", "--output-dir", type=str, default="models/predict_37_weighted")
+    parser.add_argument("-o", "--output-dir", type=str, default="../data/predictions")
     parser.add_argument("--tta", type=str, default=None)
     parser.add_argument("-b", "--batch-size", type=int, default=1, help="Batch Size during training, e.g. -b 64")
     parser.add_argument("-w", "--workers", type=int, default=0, help="")
-    parser.add_argument("-dd", "--data-dir", type=str, default="c:\\datasets\\xview2", help="Data directory")
+    parser.add_argument("-dd", "--data-dir", type=str, default="../data", help="Data directory")
     parser.add_argument("-p", "--postprocessing", type=str, default=None)
     parser.add_argument("--size", default=1024, type=int)
     parser.add_argument("--activation", default="model", type=str)
@@ -70,10 +71,11 @@ def main():
             [0.51244243, 1.42747062, 1.23648384, 0.90290896, 0.88912514],
         ),
         # 0.7673669954814148 0.8582940771677703 0.7283982461872626 [0.919932857782992, 0.5413880912001547, 0.731840942842999, 0.8396640419159087] coeffs [0.50847073 1.15392272 1.2059733  1.1340391  1.03196719]
-        (
-            "Dec30_15_34_resnet101_fpncatv2_256_512_fold0_fp16_pseudo_crops.pth",
-            [0.50847073, 1.15392272, 1.2059733, 1.1340391, 1.03196719],
-        ),
+        # BY MAYANK
+        # (
+        #     "Dec30_15_34_resnet101_fpncatv2_256_512_fold0_fp16_pseudo_crops.pth",
+        #     [0.50847073, 1.15392272, 1.2059733, 1.1340391, 1.03196719],
+        # ),
     ]
 
     fold_1_models_dict = [
@@ -162,10 +164,11 @@ def main():
 
     for models_dict in [
         fold_0_models_dict,
-        fold_1_models_dict,
-        fold_2_models_dict,
-        fold_3_models_dict,
-        fold_4_models_dict,
+        # BY MAYANK
+        # fold_1_models_dict,
+        # fold_2_models_dict,
+        # fold_3_models_dict,
+        # fold_4_models_dict,
     ]:
         for checkpoint, weights in models_dict:
             model, info = weighted_model(checkpoint, weights, activation_after)
@@ -181,7 +184,7 @@ def main():
     pd.set_option("display.width", None)
     pd.set_option("display.max_colwidth", -1)
 
-    print(df)
+    print("df:" , df)
     print("score        ", df["score"].mean(), df["score"].std())
     print("localization ", df["localization"].mean(), df["localization"].std())
     print("damage       ", df["damage"].mean(), df["damage"].std())
@@ -231,7 +234,7 @@ def main():
         fp16=fp16,
         postprocessing=postprocessing,
         save_pseudolabels=False,
-        cpu=False
+        cpu=True
     )
 
 

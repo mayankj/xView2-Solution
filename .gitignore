@@ -107,3 +107,5 @@ runs/
 /xview2.zip
 models_old/
 pretrain/
+
+**/ensemble/*

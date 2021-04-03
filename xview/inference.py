@@ -34,7 +34,7 @@ from xview.postprocessing import (
 )
 from xview.train_utils import report_checkpoint
 from xview.utils.inference_image_output import colorize_mask
-
+from PIL import Image
 import numpy as np
 
 
@@ -208,6 +208,7 @@ def model_from_checkpoint(
 ) -> Tuple[nn.Module, Dict]:
     checkpoint = torch.load(model_checkpoint, map_location="cpu")
     model_name = model or checkpoint["checkpoint_data"]["cmd_args"]["model"]
+    print("Model Name:" + model_name)
 
     score = float(checkpoint["epoch_metrics"]["valid"]["weighted_f1"])
     loc = float(checkpoint["epoch_metrics"]["valid"]["weighted_f1/localization_f1"])
@@ -302,7 +303,7 @@ def run_inference_on_dataset(
             "naive": make_predictions_naive,
             "dominant": make_predictions_dominant,
             "dominantv2": make_predictions_dominant_v2,
-            "floodfill": make_predictions_floodfill,
+            # "floodfill": make_predictions_floodfill,
         }
 
     for batch in tqdm(data_loader):
@@ -314,11 +315,11 @@ def run_inference_on_dataset(
             image = image.cuda(non_blocking=True)
 
         image_ids = batch[INPUT_IMAGE_ID_KEY]
-
+        print(image_ids)
         output = model(image)
 
         masks = output[OUTPUT_MASK_KEY]
-
+        # print("masks", masks.shape)
         if weights is not None:
             masks *= weights
 
@@ -350,7 +351,8 @@ def run_inference_on_dataset(
                 localization_image.save(localization_fname)
 
                 damage_fname = os.path.join(output_dir_for_postprocessing, f"test_damage_{image_uuid}_prediction.png")
-                damage_image = colorize_mask(damage_image)
+                # damage_image = colorize_mask(damage_image)
+                damage_image = Image.fromarray(damage_image, "L")
                 damage_image.save(damage_fname)
 
     del data_loader

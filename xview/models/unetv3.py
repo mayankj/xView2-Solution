@@ -2,7 +2,7 @@ from functools import partial
 from typing import List, Union, Callable
 
 import torch
-from pytorch_toolbelt.modules import ABN, ACT_RELU, ACT_SWISH
+from pytorch_toolbelt.modules import ABN, ACT_RELU
 from pytorch_toolbelt.modules import encoders as E
 from pytorch_toolbelt.modules.decoders import DecoderModule
 from pytorch_toolbelt.modules.encoders import EncoderModule
@@ -12,7 +12,7 @@ from torch.nn import functional as F
 from .common import disaster_type_classifier, damage_types_classifier
 from ..dataset import OUTPUT_MASK_KEY, DISASTER_TYPE_KEY, DISASTER_TYPES, DAMAGE_TYPE_KEY, DAMAGE_TYPES
 
-__all__ = ["UnetV2SegmentationModel"]
+__all__ = ["UnetV3SegmentationModel"]
 
 
 class ConvBottleneck(nn.Module):
@@ -97,7 +97,7 @@ class UNetDecoderV2(DecoderModule):
         return f
 
 
-class UnetV2SegmentationModel(nn.Module):
+class UnetV3SegmentationModel(nn.Module):
     def __init__(
         self,
         encoder: EncoderModule,
@@ -113,9 +113,10 @@ class UnetV2SegmentationModel(nn.Module):
         self.encoder = encoder
 
         feature_maps = [2 * fm for fm in encoder.output_filters]
+        decoder_feature_maps = [2 * fm + disaster_type_classes + damage_type_classes for fm in encoder.output_filters]
 
         self.decoder = UNetDecoderV2(
-            feature_maps=feature_maps,
+            feature_maps=decoder_feature_maps,
             decoder_features=unet_channels,
             mask_channels=num_classes,
             dropout=dropout,
@@ -141,13 +142,26 @@ class UnetV2SegmentationModel(nn.Module):
         batch_size = x.size(0)
         pre, post = x[:, 0:3, ...], x[:, 3:6, ...]
 
-        if self.training:
-            x = torch.cat([pre, post], dim=0)
-            features = self.encoder(x)
-            features = [torch.cat([f[0:batch_size], f[batch_size : batch_size * 2]], dim=1) for f in features]
-        else:
-            pre_features, post_features = self.encoder(pre), self.encoder(post)
-            features = [torch.cat([pre, post], dim=1) for pre, post in zip(pre_features, post_features)]
+        x = torch.cat([pre, post], dim=0)
+        features = self.encoder(x)
+
+        features = [torch.cat([f[0:batch_size], f[batch_size : batch_size * 2]], dim=1) for f in features]
+
+        output = {}
+
+        disaster_type = self.disaster_type_classifier(features[-1])
+        output[DISASTER_TYPE_KEY] = disaster_type
+
+        damage_types = self.damage_types_classifier(features[-1])
+        output[DAMAGE_TYPE_KEY] = damage_types
+
+        # Enrich feature maps with damage & disaster type classifications
+        dmg_act = damage_types.sigmoid().view(damage_types.size(0), damage_types.size(1), 1, 1)
+        dis_act = disaster_type.softmax(dim=1).view(disaster_type.size(0), disaster_type.size(1), 1, 1)
+
+        features = [torch.cat([f,
+                               dmg_act.expand(-1, -1, f.size(2), f.size(3)),
+                               dis_act.expand(-1, -1, f.size(2), f.size(3))], dim=1) for f in features]
 
         # Decode mask
         mask = self.decoder(features)
@@ -155,129 +169,69 @@ class UnetV2SegmentationModel(nn.Module):
         if self.full_size_mask:
             mask = F.interpolate(mask, size=x.size()[2:], mode="bilinear", align_corners=False)
 
-        output = {OUTPUT_MASK_KEY: mask}
+        output[OUTPUT_MASK_KEY] = mask
 
-        if self.disaster_type_classifier is not None:
-            disaster_type = self.disaster_type_classifier(features[-1])
-            output[DISASTER_TYPE_KEY] = disaster_type
-
-        if self.damage_types_classifier is not None:
-            damage_types = self.damage_types_classifier(features[-1])
-            output[DAMAGE_TYPE_KEY] = damage_types
 
         return output
 
 
-def efficientb3_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
-    encoder = E.EfficientNetB3Encoder(pretrained=pretrained,
-                                      layers=[0, 1, 2, 4, 6],
-                                      abn_params={"activation": ACT_RELU})
-    return UnetV2SegmentationModel(
-        encoder,
-        num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
-        unet_channels=[64, 128, 256, 256],
-        dropout=dropout,
-        abn_block=partial(ABN, activation=ACT_RELU),
-    )
-
-
-def densenet121_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
-    encoder = E.DenseNet121Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
-    return UnetV2SegmentationModel(
-        encoder,
-        num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
-        unet_channels=[64, 128, 256, 256],
-        dropout=dropout,
-        abn_block=partial(ABN, activation=ACT_RELU),
-    )
-
-
-def densenet169_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
-    encoder = E.DenseNet169Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
-    return UnetV2SegmentationModel(
-        encoder,
-        num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
-        unet_channels=[128, 128, 256, 256],
-        dropout=dropout,
-        abn_block=partial(ABN, activation=ACT_RELU),
-    )
-
-def resnet18_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
+def resnet18_unet_v3(input_channels=6, num_classes=5, dropout=0.0, pretrained=True):
     encoder = E.Resnet18Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
-    return UnetV2SegmentationModel(
+    return UnetV3SegmentationModel(
         encoder,
         num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
-        unet_channels=[64, 128, 256, 256],
-        dropout=dropout,
-        abn_block=partial(ABN, activation=ACT_RELU),
-    )
-def resnet34_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
-    encoder = E.Resnet34Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
-    return UnetV2SegmentationModel(
-        encoder,
-        num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
-        unet_channels=[64, 128, 256, 256],
-        dropout=dropout,
-        abn_block=partial(ABN, activation=ACT_RELU),
-    )
-
-
-def resnet50_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
-    encoder = E.Resnet50Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
-    return UnetV2SegmentationModel(
-        encoder,
-        num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
-        unet_channels=[96, 128, 256, 256],
-        dropout=dropout,
-        abn_block=partial(ABN, activation=ACT_RELU),
-    )
-
-
-def resnet101_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
-    encoder = E.Resnet101Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
-    return UnetV2SegmentationModel(
-        encoder,
-        num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
+        disaster_type_classes=len(DISASTER_TYPES),
+        damage_type_classes=len(DAMAGE_TYPES),
         unet_channels=[64, 128, 256, 384],
         dropout=dropout,
         abn_block=partial(ABN, activation=ACT_RELU),
     )
 
 
-def seresnext50_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
-    encoder = E.SEResNeXt50Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
-    return UnetV2SegmentationModel(
+def resnet101_unet_v3(input_channels=6, num_classes=5, dropout=0.0, pretrained=True):
+    encoder = E.Resnet101Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
+    return UnetV3SegmentationModel(
         encoder,
         num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
-        unet_channels=[64, 128, 256, 256],
+        disaster_type_classes=len(DISASTER_TYPES),
+        damage_type_classes=len(DAMAGE_TYPES),
+        unet_channels=[64, 128, 256, 384],
         dropout=dropout,
         abn_block=partial(ABN, activation=ACT_RELU),
     )
 
 
-def seresnext101_unet_v2(input_channels=6, num_classes=5, dropout=0.0, pretrained=True, classifiers=True):
-    encoder = E.SEResNeXt101Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
-    return UnetV2SegmentationModel(
+def resnet34_unet_v3(input_channels=6, num_classes=5, dropout=0.0, pretrained=True):
+    encoder = E.Resnet34Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
+    return UnetV3SegmentationModel(
         encoder,
         num_classes=num_classes,
-        disaster_type_classes=len(DISASTER_TYPES) if classifiers else None,
-        damage_type_classes=len(DAMAGE_TYPES) if classifiers else None,
+        disaster_type_classes=len(DISASTER_TYPES),
+        damage_type_classes=len(DAMAGE_TYPES),
+        unet_channels=[64, 128, 256, 256],
+        dropout=dropout,
+        abn_block=partial(ABN, activation=ACT_RELU),
+    )
+
+def seresnext50_unet_v3(input_channels=6, num_classes=5, dropout=0.0, pretrained=True):
+    encoder = E.SEResNeXt50Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
+    return UnetV3SegmentationModel(
+        encoder,
+        num_classes=num_classes,
+        disaster_type_classes=len(DISASTER_TYPES),
+        damage_type_classes=len(DAMAGE_TYPES),
+        unet_channels=[128, 128, 256, 256],
+        dropout=dropout,
+        abn_block=partial(ABN, activation=ACT_RELU),
+    )
+
+def seresnext101_unet_v3(input_channels=6, num_classes=5, dropout=0.0, pretrained=True):
+    encoder = E.SEResNeXt101Encoder(pretrained=pretrained, layers=[0, 1, 2, 3, 4])
+    return UnetV3SegmentationModel(
+        encoder,
+        num_classes=num_classes,
+        disaster_type_classes=len(DISASTER_TYPES),
+        damage_type_classes=len(DAMAGE_TYPES),
         unet_channels=[128, 128, 256, 384],
         dropout=dropout,
         abn_block=partial(ABN, activation=ACT_RELU),

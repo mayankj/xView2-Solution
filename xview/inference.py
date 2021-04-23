@@ -301,8 +301,8 @@ def run_inference_on_dataset(
     elif postprocessing is None:
         postprocessings = {
             "naive": make_predictions_naive,
-            "dominant": make_predictions_dominant,
-            "dominantv2": make_predictions_dominant_v2,
+            # "dominant": make_predictions_dominant,
+            # "dominantv2": make_predictions_dominant_v2,
             # "floodfill": make_predictions_floodfill,
         }
 
@@ -317,6 +317,7 @@ def run_inference_on_dataset(
         image_ids = batch[INPUT_IMAGE_ID_KEY]
         print(image_ids)
         output = model(image)
+        print(output)
 
         masks = output[OUTPUT_MASK_KEY]
         # print("masks", masks.shape)
@@ -324,6 +325,7 @@ def run_inference_on_dataset(
             masks *= weights
 
         if masks.size(2) != 1024 or masks.size(3) != 1024:
+            print("Interpolating!")
             masks = F.interpolate(masks, size=(1024, 1024), mode="bilinear", align_corners=False)
         masks = to_numpy(masks).astype(np.float32)
 

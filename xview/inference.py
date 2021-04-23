@@ -2,6 +2,7 @@ import os
 
 import torch
 from typing import Optional, Dict, List, Tuple
+import matplotlib.pyplot as plt
 
 from pytorch_toolbelt.inference.tiles import CudaTileMerger, ImageSlicer
 from pytorch_toolbelt.utils import fs
@@ -37,6 +38,7 @@ from xview.utils.inference_image_output import colorize_mask
 from PIL import Image
 import numpy as np
 
+from lime import lime_image
 
 class ApplySigmoidTo(nn.Module):
     def __init__(self, model, input_key="logits"):
@@ -306,18 +308,23 @@ def run_inference_on_dataset(
             # "floodfill": make_predictions_floodfill,
         }
 
+
     for batch in tqdm(data_loader):
+
+
         image = batch[INPUT_IMAGE_KEY]
 
+        ic(image.shape)
+
+        
         if not cpu:
             if fp16:
                 image = image.half()
             image = image.cuda(non_blocking=True)
 
         image_ids = batch[INPUT_IMAGE_ID_KEY]
-        print(image_ids)
+        ic(image_ids)
         output = model(image)
-        print(output)
 
         masks = output[OUTPUT_MASK_KEY]
         # print("masks", masks.shape)

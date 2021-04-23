@@ -16,6 +16,9 @@ from xview.inference import (
     run_inference_on_dataset,
 )
 
+from icecream import install
+install()
+ic.configureOutput(includeContext=True)
 
 def weighted_model(checkpoint_fname: str, weights, activation: str):
     model, info = model_from_checkpoint(fs.auto_file(checkpoint_fname, where="ensemble"), activation_after=activation, report=False)

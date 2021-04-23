@@ -25,7 +25,7 @@ def make_pseudolabeling_target(damage_probs:np.ndarray, ratio_threshold=1.5):
 
 
 def make_predictions_naive(damage_probs: np.ndarray):
-    print(damage_probs.shape)
+    # print(damage_probs.shape)
     loc_pred = np.stack((damage_probs[0, ...], np.sum(damage_probs[1:, ...], axis=0)))
     loc_cls = np.argmax(loc_pred, axis=0)
 
@@ -34,8 +34,8 @@ def make_predictions_naive(damage_probs: np.ndarray):
     damage_probs[0, loc_cls > 0] = 0
     dmg_cls = np.argmax(damage_probs, axis=0)
 
-    print("damage", dmg_cls.shape)
-    print("loc", loc_cls.shape)
+    # print("damage", dmg_cls.shape)
+    # print("loc", loc_cls.shape)
 
     # We want to separate 0 and 1 damage predictions
     # dmg_cls[dmg_cls == 0] = 1  # Fill remaining with damage type 1 (no damage)
